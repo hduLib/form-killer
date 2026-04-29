@@ -1,0 +1,72 @@
+{
+  "id": "69e4f367d04688b72f93623c",
+  "name": "ES-S2026 LW4 Report",
+  "texts": {
+    "submit": "Send"
+  },
+  "pages": [
+    {
+      "items": [
+        {
+          "id": "answer_short_text_7982812",
+          "label": "Name",
+          "hidden": false,
+          "type": "string",
+          "multiline": false,
+          "validations": [{"type": "required"}]
+        },
+        {
+          "id": "answer_short_text_7982813",
+          "label": "HDU ID",
+          "hidden": false,
+          "type": "string",
+          "multiline": false,
+          "validations": [{"type": "required"}]
+        },
+        {
+          "id": "answer_short_text_8415325",
+          "label": "Variant №",
+          "hidden": false,
+          "type": "string",
+          "multiline": false,
+          "validations": [{"type": "required"}]
+        },
+        {
+          "id": "answer_files_7987810",
+          "label": "The file of the report",
+          "hidden": false,
+          "type": "file",
+          "validations": [{"type": "required"}, {"type": "size", "value": 20}, {"type": "count", "value": 1}]
+        },
+        {
+          "id": "answer_choices_71845799",
+          "label": "What is the difference between functions HAL_UART_Transmit() and HAL_UART_Transmit_IT()?",
+          "hidden": false,
+          "type": "enum",
+          "widget": "radio",
+          "items": [
+            {
+              "id": "142523260",
+              "label": "HAL_UART_Transmit() sends data in blocking mode, while HAL_UART_Transmit_IT() sends data in interrupt mode."
+            },
+            {
+              "id": "142528232",
+              "label": "HAL_UART_Transmit_IT() can only transmit one byte at a time, while HAL_UART_Transmit() can transmit multiple bytes."
+            }
+          ]
+        },
+        {
+          "id": "answer_choices_71845819",
+          "label": "What errors can be detected by the USART module?",
+          "hidden": false,
+          "type": "enum",
+          "widget": "radio",
+          "items": [
+            {"id": "142528845", "label": "Voltage error and Current error."},
+            {"id": "142523296", "label": "Parity error, Framing error, Overrun error, and Noise error."}
+          ]
+        }
+      ]
+    }
+  ]
+}
