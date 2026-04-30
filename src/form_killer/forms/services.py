@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import importlib
+import pkgutil
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
@@ -11,11 +12,8 @@ from form_killer.forms.base import FormService
 
 Provider = str
 DocumentType = str
-BUILTIN_FORM_PROVIDER_MODULES = (
-    "form_killer.forms.yandex",
-    "form_killer.forms.tencent",
-    "form_killer.forms.wps",
-)
+BUILTIN_FORM_PROVIDER_PACKAGE = "form_killer.forms"
+_FORM_PROVIDER_INFRASTRUCTURE_MODULES = frozenset({"base", "browser_common", "services"})
 _FORM_PROVIDER_PLUGINS_LOADED = False
 
 
@@ -70,9 +68,24 @@ def load_form_provider_plugins(*, force: bool = False) -> None:
     global _FORM_PROVIDER_PLUGINS_LOADED
     if _FORM_PROVIDER_PLUGINS_LOADED and not force:
         return
-    for module_name in BUILTIN_FORM_PROVIDER_MODULES:
+    for module_name in _discover_builtin_form_provider_modules():
         importlib.import_module(module_name)
     _FORM_PROVIDER_PLUGINS_LOADED = True
+
+
+def _discover_builtin_form_provider_modules() -> tuple[str, ...]:
+    package = importlib.import_module(BUILTIN_FORM_PROVIDER_PACKAGE)
+    package_paths = getattr(package, "__path__", None)
+    if package_paths is None:
+        return ()
+
+    modules = []
+    for module_info in pkgutil.iter_modules(package_paths, prefix=f"{BUILTIN_FORM_PROVIDER_PACKAGE}."):
+        short_name = module_info.name.rsplit(".", maxsplit=1)[-1]
+        if short_name.startswith("_") or short_name in _FORM_PROVIDER_INFRASTRUCTURE_MODULES:
+            continue
+        modules.append(module_info.name)
+    return tuple(sorted(modules))
 
 
 def register_form_provider(provider: FormProvider) -> None:

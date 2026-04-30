@@ -1,76 +1,81 @@
-﻿# form-killer
+# form-killer
 
-中文 CLI 问卷答题工具，通过表单 provider 插件支持不同平台，并使用 OpenAI 生成答案。
+中文 CLI 问卷答题工具，仅供学习参考。通过表单 provider 插件支持不同平台，并使用兼容 OpenAI API 格式的模型生成答案。
+
+## 运行
+
+在仓库内开发运行：
 
 ```powershell
 uv run form-killer
 ```
 
-直接运行 `uv run form-killer`，后续按 CLI 内部提示走即可：
+从 Git 仓库临时运行：
 
-1. CLI 会显示当前已注册的表单 provider 插件列表。
-2. 输入任一受支持平台的页面 URL。
-3. 工具输出解析好的表单结构。
-4. 对姓名、ID、邮箱、电话、地址、文件上传等字段，工具会标为用户输入。
-5. 选择本次使用的 OpenAI 模型，默认使用已保存模型或 `gpt-5.5`。
-6. AI 生成格式化答案并输出预览。
-7. 最终由用户确认提交。
+```powershell
+uvx --from "git+https://github.com/<owner>/<repo>.git" form-killer
+```
 
-## 本地缓存
+拉取 Git 仓库最新内容后运行：
+
+```powershell
+uvx --refresh --from "git+https://github.com/<owner>/<repo>.git" form-killer
+```
+
+进入 CLI 后按提示操作：
+
+1. 选择已注册的表单 provider。
+2. 输入受支持平台的表单 URL。
+3. 检查解析出的表单结构。
+4. 按提示填写姓名、ID、邮箱、电话、地址、文件上传等用户输入字段。
+5. 选择模型，默认使用已保存模型或 `gpt-5.5`。
+6. 检查 AI 生成的答案预览。
+7. 确认后提交。
+
+## 配置
 
 本地配置和缓存默认保存在项目目录 `.form-killer/`：
 
-- `.form-killer/config.toml`：OpenAI API Key、Base URL、模型和 provider 配置。
+- `.form-killer/config.toml`：API Key、Base URL、模型和 provider 配置。
 - `.form-killer/sessions/`：浏览器登录 session。
 
-OpenAI 配置优先级：
+模型服务配置优先级：
 
 1. 命令行参数：`--api-key`、`--base-url`
 2. 环境变量：`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`
 3. 本地配置：`form-killer config set-openai-key`、`form-killer config set-openai-base-url`、`form-killer config set-openai-model`
 
-## Dry-run
+## 预演
 
-`--dry-run` 表示“预演/试跑”，用于检查解析、答案生成、必填项和提交数据格式，但不做最终提交。
+提交前先用 `--dry-run` 检查解析、答案生成、必填项和提交数据格式：
 
 ```powershell
 uv run form-killer answer "表单URL" --dry-run
 ```
 
-行为说明：
+Provider 预演行为：
 
-- 会解析表单并生成答案预览。
-- 会构造提交数据并尽量做校验。
-- 不会向目标平台发送最终提交请求。
-- 适合在首次使用新 provider、新表单或新答案文件时先跑一遍。
+- Yandex Forms：使用平台接口的 `dryRun` 校验。
+- 腾讯文档/WPS/金山表单：执行本地流程校验。
 
-Provider 差异：
+确认提交时使用 `--submit`：
 
-- Yandex Forms：使用平台接口的 `dryRun` 校验，不创建真实提交。
-- 腾讯文档/WPS/金山表单：当前 dry-run 只做本地流程校验，不打开页面填写，也不点击提交。
-
-真实提交仍需显式使用 `--submit`，并在交互确认后才会发送。
+```powershell
+uv run form-killer answer "表单URL" --submit
+```
 
 ## Provider 插件开发
 
-Provider 插件负责识别 URL、解析表单、上传文件、提交答案，以及可选的登录流程。CLI 不应写死某个平台；它只读取已注册 provider 列表，并监听服务事件来输出日志、二维码和状态。
+Provider 插件负责识别 URL、解析表单、上传文件、提交答案，以及处理登录流程。CLI 读取已注册 provider 列表，并通过服务事件输出日志、二维码和状态。
 
-### 注册方式
-
-当前项目的第三方 provider 也是直接加在本仓库里，不需要另起一个 Python project。插件必须由插件模块自己注册。核心代码只做一件事：
-
-1. 启动时加载内置 provider 模块。
-
-不要把 provider 注册放进 `form_killer.forms.__init__`，也不要让核心路由 import 某个具体平台。
-
-在本项目内新增 provider 的步骤：
+### 新增 provider
 
 1. 新建模块，例如 `src/form_killer/forms/example.py`。
-2. 在模块里实现 service 和 provider 注册代码。
-3. 把模块名加入 `src/form_killer/forms/services.py` 的 `BUILTIN_FORM_PROVIDER_MODULES`。
-4. 增加对应测试。
+2. 在模块顶层调用 `register_form_provider(...)` 注册 provider。
+3. 实现对应的表单 service。
+4. 增加 provider 测试。
 
-最简单的插件入口是 `register_form_provider()`：
+按域名匹配时使用 `HostFormProvider`：
 
 ```python
 from form_killer.forms.services import HostFormProvider, register_form_provider
@@ -87,7 +92,7 @@ register_form_provider(
 )
 ```
 
-如果不是按域名匹配，也可以实现自定义 provider：
+按自定义规则匹配时实现 provider 的 `resolve()`：
 
 ```python
 from form_killer.forms.services import RoutedFormService, register_form_provider
@@ -98,36 +103,31 @@ class ExampleProvider:
     label = "Example Forms"
 
     def resolve(self, url: str):
-        if not url.startswith("example://"):
-            return None
-        return RoutedFormService(
-            provider=self.name,
-            document_type="form",
-            service=ExampleFormService(document_type="form"),
-        )
+        if url.startswith("example://"):
+            return RoutedFormService(
+                provider=self.name,
+                document_type="form",
+                service=ExampleFormService(document_type="form"),
+            )
+        return None
 
 
 register_form_provider(ExampleProvider())
 ```
 
-### 本项目内加载
+启动时会扫描 `form_killer.forms` 包内的 provider 模块，并执行模块顶层的注册代码。
 
-本项目启动时会加载 `BUILTIN_FORM_PROVIDER_MODULES` 中列出的模块。新增仓库内 provider 时，把模块路径加进去即可：
+### 实现 service
 
-```python
-BUILTIN_FORM_PROVIDER_MODULES = (
-    "form_killer.forms.yandex",
-    "form_killer.forms.tencent",
-    "form_killer.forms.wps",
-    "form_killer.forms.example",
-)
-```
+服务类实现 `FormService` 协议常用方法：
 
-模块被加载后，模块内的 `register_form_provider(...)` 会执行。不需要额外入口函数，也不需要任何打包配置。
+- `fetch_schema(...)`：解析表单并返回 `FormSchema`。
+- `login(...)`：处理登录并保存 session。
+- `upload_file(...)`：上传文件并返回平台需要的文件值。
+- `submit(...)`：执行预演校验或正式提交。
+- `verify_submission(...)`：按提交结果做后续验证。
 
-### 服务实现
-
-服务类建议实现 `FormService` 协议：
+示例骨架：
 
 ```python
 from pathlib import Path
@@ -154,16 +154,12 @@ class ExampleFormService:
     def fetch_schema(self, url: str, event_handler: ServiceEventHandler | None = None) -> FormSchema:
         if event_handler:
             event_handler(ServiceEvent("parse_start", provider=self.provider, provider_label=self.label))
-        # TODO: 拉取页面或接口，返回 FormSchema
         raise NotImplementedError
 
     def login(self, url: str, event_handler: ServiceEventHandler | None = None, **kwargs) -> str | None:
         if event_handler:
             event_handler(ServiceEvent("checking", provider=self.provider, provider_label=self.label))
-            # 如需二维码，发送 image_bytes，让 CLI 决定如何显示
-            # event_handler(ServiceEvent("challenge", provider=self.provider, provider_label=self.label, image_bytes=png_bytes))
             event_handler(ServiceEvent("waiting", provider=self.provider, provider_label=self.label))
-        # TODO: 完成登录并保存 session
         return None
 
     def upload_file(self, schema: FormSchema, question: Question, path: Path) -> Any:
@@ -185,7 +181,6 @@ class ExampleFormService:
                     provider_label=self.label,
                 )
             )
-        # TODO: dry-run 或真实提交
         return {"ok": True}
 
     def verify_submission(self, schema: FormSchema, answer_key: str) -> dict[str, Any]:

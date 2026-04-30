@@ -6,6 +6,7 @@ from form_killer.forms.base import FormSchema
 from form_killer.forms.services import (
     FormRouteError,
     RoutedFormService,
+    _discover_builtin_form_provider_modules,
     form_providers,
     register_form_provider,
     resolve_form_service,
@@ -41,6 +42,15 @@ def test_builtin_providers_register_themselves() -> None:
     names = {provider.name for provider in form_providers()}
 
     assert {"yandex", "tencent", "wps"} <= names
+
+
+def test_builtin_provider_modules_are_discovered_by_convention() -> None:
+    modules = _discover_builtin_form_provider_modules()
+
+    assert "form_killer.forms.yandex" in modules
+    assert "form_killer.forms.tencent" in modules
+    assert "form_killer.forms.wps" in modules
+    assert "form_killer.forms.services" not in modules
 
 
 def test_resolve_form_service_can_disable_builtin_providers() -> None:
