@@ -13,13 +13,13 @@ uv run form-killer
 从 Git 仓库临时运行：
 
 ```powershell
-uvx --from "git+https://github.com/<owner>/<repo>.git" form-killer
+uvx --from "git+https://github.com/hduLib/form-killer.git" form-killer
 ```
 
 拉取 Git 仓库最新内容后运行：
 
 ```powershell
-uvx --refresh --from "git+https://github.com/<owner>/<repo>.git" form-killer
+uvx --refresh --from "https://github.com/hduLib/form-killer.git" form-killer
 ```
 
 进入 CLI 后按提示操作：
