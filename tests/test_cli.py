@@ -106,6 +106,75 @@ def test_cli_inspect_renders_schema(monkeypatch) -> None:
     assert "Pick one" in result.output
 
 
+def test_cli_inspect_uses_agent_browser_fallback(monkeypatch) -> None:
+    seen: dict[str, str | None] = {}
+
+    class FakeAgentService:
+        provider = "agent-browser"
+        label = "Agent Loop 浏览器回退"
+        document_type = "form"
+
+        def configure_openai(self, *, api_key, base_url, model):
+            seen["api_key"] = api_key
+            seen["base_url"] = base_url
+            seen["model"] = model
+
+        def fetch_schema(self, url: str, event_handler=None):
+            assert url == "https://example.test/form"
+            return sample_schema()
+
+    monkeypatch.setattr(
+        cli,
+        "resolve_form_service",
+        lambda url: RoutedFormService(provider="agent-browser", document_type="form", service=FakeAgentService()),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "inspect",
+            "https://example.test/form",
+            "--api-key",
+            "test",
+            "--base-url",
+            "https://llm.example.test/v1",
+            "--model",
+            "gpt-test",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen == {"api_key": "test", "base_url": "https://llm.example.test/v1", "model": "gpt-test"}
+    assert "CLI Sample" in result.output
+
+
+def test_cli_inspect_agent_option_forces_agent_browser(monkeypatch) -> None:
+    seen: list[str] = []
+
+    class FakeAgentService:
+        provider = "agent-browser"
+        label = "Agent Loop 浏览器回退"
+        document_type = "form"
+
+        def configure_openai(self, *, api_key, base_url, model):
+            seen.append(f"configure:{api_key}:{model}")
+
+        def fetch_schema(self, url: str, event_handler=None):
+            seen.append(f"fetch:{url}")
+            return sample_schema()
+
+    monkeypatch.setattr(cli, "AgentBrowserFormService", lambda: FakeAgentService())
+
+    result = runner.invoke(
+        cli.app,
+        ["inspect", "https://docs.qq.com/form/page/demo", "--agent", "--api-key", "test", "--model", "gpt-test"],
+    )
+
+    assert result.exit_code == 0
+    assert seen == ["configure:test:gpt-test", "fetch:https://docs.qq.com/form/page/demo"]
+    assert "CLI Sample" in result.output
+
+
 def test_cli_answer_dry_run_with_answers_file(monkeypatch, tmp_path) -> None:
     submitted: list[tuple[dict, bool]] = []
 
@@ -162,6 +231,203 @@ def test_cli_answer_dry_run_with_answers_file(monkeypatch, tmp_path) -> None:
     assert result.exit_code == 0
     assert submitted == [({"name": "Alice", "q1": ["b"]}, True)]
     assert "dry-run 校验通过" in result.output
+
+
+def test_cli_answer_agent_browser_dry_run_does_not_submit(monkeypatch, tmp_path) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class FakeAgentService:
+        provider = "agent-browser"
+        label = "Agent Loop 浏览器回退"
+        document_type = "form"
+
+        def configure_openai(self, *, api_key, base_url, model):
+            calls.append(("configure", (api_key, base_url, model)))
+
+        def fetch_schema(self, url: str, event_handler=None):
+            calls.append(("fetch", url))
+            return sample_schema()
+
+        def upload_file(self, schema, question, path):
+            raise AssertionError("No file upload expected")
+
+        def submit(self, schema, values: dict, *, dry_run: bool, event_handler=None):
+            calls.append(("submit", (values, dry_run)))
+            return {"ok": True, "dryRun": dry_run}
+
+    class FakeAnswerer:
+        def __init__(self, *, api_key: str, model: str, base_url: str | None = None):
+            pass
+
+        def classify_personal_questions(self, schema, questions):
+            return set()
+
+        def answer(self, schema, questions):
+            return LLMAnswerSet.model_validate(
+                {"answers": [{"question_id": "q1", "option_ids": ["b"], "confidence": 0.95}]}
+            )
+
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps({"Name": "Alice"}), encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "resolve_form_service",
+        lambda url: RoutedFormService(provider="agent-browser", document_type="form", service=FakeAgentService()),
+    )
+    monkeypatch.setattr(cli, "OpenAIAnswerer", FakeAnswerer)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "answer",
+            "https://example.test/form",
+            "--answers",
+            str(answers_path),
+            "--api-key",
+            "test",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert ("submit", ({"name": "Alice", "q1": ["b"]}, True)) in calls
+    assert "dry-run 校验通过" in result.output
+
+
+def test_cli_answer_agent_option_forces_agent_browser(monkeypatch, tmp_path) -> None:
+    calls: list[str] = []
+
+    class FakeAgentService:
+        provider = "agent-browser"
+        label = "Agent Loop 浏览器回退"
+        document_type = "form"
+
+        def configure_openai(self, *, api_key, base_url, model):
+            calls.append(f"configure:{api_key}")
+
+        def fetch_schema(self, url: str, event_handler=None):
+            calls.append(f"fetch:{url}")
+            return sample_schema()
+
+        def upload_file(self, schema, question, path):
+            raise AssertionError("No file upload expected")
+
+        def submit(self, schema, values: dict, *, dry_run: bool, event_handler=None):
+            calls.append(f"submit:{dry_run}:{values['name']}")
+            return {"ok": True, "dryRun": dry_run}
+
+    class FakeAnswerer:
+        def __init__(self, *, api_key: str, model: str, base_url: str | None = None):
+            pass
+
+        def classify_personal_questions(self, schema, questions):
+            return set()
+
+        def answer(self, schema, questions):
+            return LLMAnswerSet.model_validate(
+                {"answers": [{"question_id": "q1", "option_ids": ["b"], "confidence": 0.95}]}
+            )
+
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps({"Name": "Alice"}), encoding="utf-8")
+    monkeypatch.setattr(cli, "AgentBrowserFormService", lambda: FakeAgentService())
+    monkeypatch.setattr(cli, "OpenAIAnswerer", FakeAnswerer)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "answer",
+            "https://docs.qq.com/form/page/demo",
+            "--agent",
+            "--answers",
+            str(answers_path),
+            "--api-key",
+            "test",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [
+        "configure:test",
+        "fetch:https://docs.qq.com/form/page/demo",
+        "submit:True:Alice",
+    ]
+
+
+def test_cli_answer_agent_browser_submit_requires_confirmation(monkeypatch, tmp_path) -> None:
+    calls: list[str] = []
+
+    class FakeAgentService:
+        provider = "agent-browser"
+        label = "Agent Loop 浏览器回退"
+        document_type = "form"
+
+        def configure_openai(self, *, api_key, base_url, model):
+            pass
+
+        def fetch_schema(self, url: str, event_handler=None):
+            return sample_schema()
+
+        def upload_file(self, schema, question, path):
+            raise AssertionError("No file upload expected")
+
+        def submit(self, schema, values: dict, *, dry_run: bool, event_handler=None):
+            calls.append(f"submit:{dry_run}")
+            return {"ok": True}
+
+    class FakeAnswerer:
+        def __init__(self, *, api_key: str, model: str, base_url: str | None = None):
+            pass
+
+        def classify_personal_questions(self, schema, questions):
+            return set()
+
+        def answer(self, schema, questions):
+            return LLMAnswerSet.model_validate(
+                {"answers": [{"question_id": "q1", "option_ids": ["b"], "confidence": 0.95}]}
+            )
+
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps({"Name": "Alice"}), encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "resolve_form_service",
+        lambda url: RoutedFormService(provider="agent-browser", document_type="form", service=FakeAgentService()),
+    )
+    monkeypatch.setattr(cli, "OpenAIAnswerer", FakeAnswerer)
+
+    cancelled = runner.invoke(
+        cli.app,
+        [
+            "answer",
+            "https://example.test/form",
+            "--answers",
+            str(answers_path),
+            "--api-key",
+            "test",
+            "--submit",
+        ],
+        input="n\n",
+    )
+    assert cancelled.exit_code == 0
+    assert calls == []
+
+    confirmed = runner.invoke(
+        cli.app,
+        [
+            "answer",
+            "https://example.test/form",
+            "--answers",
+            str(answers_path),
+            "--api-key",
+            "test",
+            "--submit",
+            "--yes",
+        ],
+    )
+    assert confirmed.exit_code == 0
+    assert calls == ["submit:False"]
 
 
 def test_cli_answer_prompts_for_url_when_missing(monkeypatch, tmp_path) -> None:

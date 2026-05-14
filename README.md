@@ -57,6 +57,7 @@ Provider 预演行为：
 
 - Yandex Forms：使用平台接口的 `dryRun` 校验。
 - 腾讯文档/WPS/金山表单：执行本地流程校验。
+- 未知表单或 `--agent`：使用浏览器 Agent 将页面 DOM 转成通用 FormSchema，再按 schema 回填；遇到验证码会打开当前会话供人工验证，`--dry-run` 不点击提交。
 
 确认提交时使用 `--submit`：
 

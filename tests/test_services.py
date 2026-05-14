@@ -50,6 +50,7 @@ def test_builtin_provider_modules_are_discovered_by_convention() -> None:
     assert "form_killer.forms.yandex" in modules
     assert "form_killer.forms.tencent" in modules
     assert "form_killer.forms.wps" in modules
+    assert "form_killer.forms.agent_browser" not in modules
     assert "form_killer.forms.services" not in modules
 
 
@@ -58,6 +59,23 @@ def test_resolve_form_service_can_disable_builtin_providers() -> None:
         resolve_form_service("https://forms.yandex.ru/u/demo/", providers=[])
 
     assert "已注册的表单 provider" in str(exc_info.value)
+
+
+def test_resolve_form_service_falls_back_to_agent_browser_for_unknown_http_url() -> None:
+    routed = resolve_form_service("https://example.test/form")
+
+    assert routed.provider == "agent-browser"
+    assert routed.document_type == "form"
+
+
+def test_resolve_form_service_does_not_fallback_for_explicit_providers() -> None:
+    with pytest.raises(FormRouteError):
+        resolve_form_service("https://example.test/form", providers=[])
+
+
+def test_resolve_form_service_does_not_fallback_for_non_http_url() -> None:
+    with pytest.raises(FormRouteError):
+        resolve_form_service("fake://demo")
 
 
 def test_register_form_provider_replaces_provider_by_name() -> None:

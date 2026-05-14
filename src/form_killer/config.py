@@ -23,7 +23,7 @@ DEFAULT_WPS_LOGIN_TIMEOUT_SECONDS = 180
 DEFAULT_WPS_HEADLESS = False
 
 
-ApiKeySource = Literal["cli", "env", "config", "missing"]
+ApiKeySource = Literal["cli", "env", "config", "codex", "missing"]
 
 
 def get_project_cache_dir() -> Path:
@@ -73,6 +73,9 @@ def load_api_key_with_source() -> tuple[str | None, ApiKeySource]:
     value = data.get("openai_api_key")
     if value:
         return str(value), "config"
+    codex_key = load_codex_api_key()
+    if codex_key:
+        return codex_key, "codex"
     return None, "missing"
 
 
@@ -103,6 +106,46 @@ def save_model(model: str | None) -> str:
 
 def load_model() -> str | None:
     value = _read_config_file().get(MODEL_KEY)
+    return str(value) if value else None
+
+
+def get_codex_home() -> Path:
+    return Path(os.getenv("CODEX_HOME") or Path.home() / ".codex").expanduser()
+
+
+def get_codex_auth_path() -> Path:
+    return get_codex_home() / "auth.json"
+
+
+def get_codex_config_path() -> Path:
+    return get_codex_home() / "config.toml"
+
+
+def load_codex_api_key() -> str | None:
+    path = get_codex_auth_path()
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    value = data.get("OPENAI_API_KEY")
+    return str(value) if value else None
+
+
+def load_codex_base_url() -> str | None:
+    data = _read_toml_file(get_codex_config_path())
+    provider_name = str(data.get("model_provider") or "")
+    providers = data.get("model_providers")
+    if isinstance(providers, dict):
+        provider = providers.get(provider_name)
+        if isinstance(provider, dict) and provider.get("base_url"):
+            return str(provider["base_url"]).rstrip("/")
+    return None
+
+
+def load_codex_model() -> str | None:
+    value = _read_toml_file(get_codex_config_path()).get("model")
     return str(value) if value else None
 
 
@@ -211,6 +254,16 @@ def _read_config_file() -> dict[str, str]:
             return {}
         return _normalize_config(data)
     return {}
+
+
+def _read_toml_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _normalize_config(data: object) -> dict[str, str]:

@@ -53,6 +53,7 @@ def test_project_api_key_preserves_base_url(monkeypatch, tmp_path) -> None:
 def test_clear_api_key_preserves_base_url(monkeypatch, tmp_path) -> None:
     path = tmp_path / "config.toml"
     monkeypatch.setattr(config, "get_config_path", lambda: path)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-missing"))
 
     config.save_base_url("https://llm.example.test/v1")
     path.write_text(
@@ -73,6 +74,30 @@ def test_load_api_key_with_source(monkeypatch, tmp_path) -> None:
     path.write_text('openai_api_key = "saved-key"\n', encoding="utf-8")
 
     assert config.load_api_key_with_source() == ("saved-key", "config")
+
+
+def test_load_api_key_falls_back_to_codex_auth(monkeypatch, tmp_path) -> None:
+    project_config = tmp_path / "missing.toml"
+    codex_home = tmp_path / "codex"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"OPENAI_API_KEY": "codex-key"}', encoding="utf-8")
+    monkeypatch.setattr(config, "get_config_path", lambda: project_config)
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    assert config.load_api_key_with_source() == ("codex-key", "codex")
+
+
+def test_load_codex_openai_defaults(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        'model_provider = "OpenAI"\nmodel = "gpt-codex"\n[model_providers.OpenAI]\nbase_url = "https://llm.example.test/"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    assert config.load_codex_base_url() == "https://llm.example.test"
+    assert config.load_codex_model() == "gpt-codex"
 
 
 def test_session_paths_expand_environment_variables(monkeypatch, tmp_path) -> None:

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from form_killer.browser import BrowserLaunchError, launch_chromium
 from form_killer.events import LoginTimeoutError, ServiceEvent, ServiceEventHandler
 from form_killer.forms.base import FormSchema, Option, Question
+from form_killer.forms.schema import FORM_CONTROL_BINDINGS_KEY, build_control_binding
 
 
 SessionT = TypeVar("SessionT", bound="BrowserFormSession")
@@ -302,6 +303,7 @@ def build_browser_form_schema(
 ) -> FormSchema:
     questions: list[Question] = []
     metadata: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_questions, 1):
         raw_id = str(raw.get("id") or f"q_{index}")
         kind = normalize_browser_question_kind(str(raw.get("kind") or "unsupported"), raw.get("options") or [])
@@ -329,6 +331,15 @@ def build_browser_form_schema(
                 "options": [option.model_dump() for option in options],
             }
         )
+        bindings.append(
+            build_control_binding(
+                question,
+                handle=str(raw.get("handle") or raw.get("id") or question.id),
+                dom_index=int(raw.get("dom_index", index - 1)),
+                selector=raw.get("selector"),
+                options=raw.get("options") or [],
+            )
+        )
 
     return FormSchema(
         id=extract_form_id(source_url, default_form_id),
@@ -340,6 +351,7 @@ def build_browser_form_schema(
             "document_type": "form",
             "source_url": source_url,
             raw_questions_key: metadata,
+            FORM_CONTROL_BINDINGS_KEY: bindings,
         },
     )
 

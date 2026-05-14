@@ -87,17 +87,22 @@ def normalize_value(question: Question, raw: Any) -> Any:
 def normalize_choice_value(question: Question, raw: Any) -> list[str]:
     values = raw if isinstance(raw, list) else [raw]
     by_id = {option.id: option.id for option in question.options}
+    by_slug = {slug_text(option.id): option.id for option in question.options}
     by_label = {option.label.strip().lower(): option.id for option in question.options}
     result: list[str] = []
     for value in values:
         text = str(value).strip()
-        option_id = by_id.get(text) or by_label.get(text.lower())
+        option_id = by_id.get(text) or by_slug.get(slug_text(text)) or by_label.get(text.lower())
         if not option_id:
             raise AnswerError(f"Unknown option for '{question.label}': {value}")
         result.append(option_id)
     if question.kind in {"enum", "dropdown"}:
         return result[:1]
     return result
+
+
+def slug_text(value: str) -> str:
+    return "".join("_" if not char.isalnum() else char.lower() for char in value).strip("_")
 
 
 def build_values(schema: FormSchema, answers: list[AnswerPayload]) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from form_killer.forms.browser_common import build_browser_form_schema, normalize_browser_question_kind
+from form_killer.forms.schema import FORM_CONTROL_BINDINGS_KEY
 
 
 def test_build_browser_form_schema_keeps_provider_specific_metadata() -> None:
@@ -36,6 +37,9 @@ def test_build_browser_form_schema_keeps_provider_specific_metadata() -> None:
     assert schema.questions[1].kind == "text"
     assert schema.raw["tencent_questions"][0]["selector"] == "#identity"
     assert schema.raw["tencent_questions"][1]["dom_index"] == 1
+    assert schema.raw[FORM_CONTROL_BINDINGS_KEY][0]["id"] == "identity"
+    assert schema.raw[FORM_CONTROL_BINDINGS_KEY][0]["handle"] == "identity"
+    assert schema.raw[FORM_CONTROL_BINDINGS_KEY][0]["selector"] == "#identity"
 
 
 def test_normalize_browser_question_kind_uses_options_as_choice_fallback() -> None:

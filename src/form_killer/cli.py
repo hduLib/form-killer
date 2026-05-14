@@ -27,6 +27,8 @@ from form_killer.config import (
     load_api_key,
     load_api_key_with_source,
     load_base_url,
+    load_codex_base_url,
+    load_codex_model,
     load_model,
     save_api_key,
     save_base_url,
@@ -35,6 +37,7 @@ from form_killer.config import (
 from form_killer.captcha import BrowserCaptchaSession, CaptchaHandoffError
 from form_killer.events import ServiceEvent
 from form_killer.forms.base import AnswerPayload, FormSchema, FormServiceError, Question
+from form_killer.forms.agent_browser import AGENT_BROWSER_PROVIDER, AgentBrowserFormService
 from form_killer.forms.services import (
     FormRouteError,
     RoutedFormService,
@@ -114,12 +117,19 @@ def login_command(
 @app.command()
 def inspect(
     url: Annotated[str | None, typer.Argument(help=SUPPORTED_URL_HELP)] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", help="Agent Loop 回退使用的 OpenAI API Key。")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url", help="Agent Loop 回退使用的 OpenAI 兼容接口 Base URL。")] = None,
+    model: Annotated[str | None, typer.Option("--model", help="Agent Loop 回退使用的 OpenAI 模型。")] = None,
+    agent: Annotated[bool, typer.Option("--agent", help="强制使用 Agent Loop 浏览器工具路线，跳过预设 provider。")] = False,
     debug_browser: Annotated[bool, typer.Option("--debug-browser", help="遇到站点验证时打开浏览器供手动检查。")] = False,
 ) -> None:
     """解析并显示表单结构，不调用 AI，不提交。"""
     url = url or Prompt.ask("请输入页面 URL").strip()
     try:
-        routed = resolve_form_service(url)
+        routed = resolve_cli_form_service(url, force_agent=agent)
+        if is_agent_browser_route(routed):
+            configure_agent_browser_service(routed.service, api_key, base_url, model)
+            configure_agent_browser_handoff(routed.service, allow_handoff=True)
         schema = fetch_schema_with_handoff(routed, url, allow_handoff=debug_browser)
     except (FormRouteError, FormServiceError, LoginTimeoutError) as exc:
         if isinstance(exc, YandexCaptchaError):
@@ -142,6 +152,7 @@ def answer(
     yes: Annotated[bool, typer.Option("--yes", help="非交互确认；只在同时传入 --submit 时有效。")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="只做 dry-run 校验，不最终提交。")] = False,
     debug_browser: Annotated[bool, typer.Option("--debug-browser", help="预留给浏览器调试；默认纯 CLI。")] = False,
+    agent: Annotated[bool, typer.Option("--agent", help="强制使用 Agent Loop 浏览器工具路线，跳过预设 provider。")] = False,
     interactive_setup: Annotated[bool, typer.Option(hidden=True)] = False,
 ) -> None:
     """开始答题：解析表单、让 AI 作答、预览结果、可选提交。"""
@@ -155,8 +166,16 @@ def answer(
         console.print("[yellow]当前主流程仍使用纯 CLI；debug-browser 仅作为后续排查入口。[/yellow]")
 
     try:
-        routed = resolve_form_service(url)
+        routed = resolve_cli_form_service(url, force_agent=agent)
         service = routed.service
+        key: str | None = None
+        resolved_base_url: str | None = None
+        resolved_model = DEFAULT_MODEL
+        key_source: ApiKeySource = "missing"
+        if is_agent_browser_route(routed):
+            key, resolved_base_url, resolved_model, key_source = resolve_openai_settings(api_key, base_url, model)
+            configure_agent_browser_service(service, key, resolved_base_url, resolved_model, already_resolved=True)
+            configure_agent_browser_handoff(service, allow_handoff=True)
         schema = fetch_schema_with_handoff(
             routed,
             url,
@@ -164,7 +183,8 @@ def answer(
         )
         render_output_header(console, "表单解析完成", "已从页面 URL 解析出题目、字段类型、必填状态和选项。")
         render_schema(console, schema)
-        key, resolved_base_url, resolved_model, key_source = resolve_openai_settings(api_key, base_url, model)
+        if key is None:
+            key, resolved_base_url, resolved_model, key_source = resolve_openai_settings(api_key, base_url, model)
         mapping = load_answer_file(answers)
         initial_llm_questions = select_llm_questions(schema, mapping)
         if interactive_setup and initial_llm_questions:
@@ -347,16 +367,57 @@ def collect_user_answers(
     return answers
 
 
-def resolve_form_service(url: str) -> RoutedFormService:
+def resolve_form_service(url: str, *, force_agent: bool = False) -> RoutedFormService:
+    if force_agent:
+        return RoutedFormService(provider=AGENT_BROWSER_PROVIDER, document_type="form", service=AgentBrowserFormService())
     try:
-        routed = resolve_service_route(url)
+        routed = resolve_service_route(url, allow_agent_browser_fallback=False)
     except FormRouteError:
         if getattr(YandexFormAdapter, "__module__", "") != "form_killer.forms.yandex":
             return RoutedFormService(provider="yandex", document_type="form", service=YandexFormService(YandexFormAdapter()))
-        raise
+        routed = resolve_service_route(url)
     if routed.provider == "yandex":
         return RoutedFormService(provider="yandex", document_type="form", service=YandexFormService(YandexFormAdapter()))
     return routed
+
+
+def resolve_cli_form_service(url: str, *, force_agent: bool = False) -> RoutedFormService:
+    try:
+        return resolve_form_service(url, force_agent=force_agent)
+    except TypeError as exc:
+        if "force_agent" not in str(exc):
+            raise
+        if force_agent:
+            return RoutedFormService(provider=AGENT_BROWSER_PROVIDER, document_type="form", service=AgentBrowserFormService())
+        return resolve_form_service(url)
+
+
+def is_agent_browser_route(routed: RoutedFormService) -> bool:
+    return routed.provider == AGENT_BROWSER_PROVIDER or isinstance(routed.service, AgentBrowserFormService)
+
+
+def configure_agent_browser_service(
+    service,
+    api_key: str | None,
+    base_url: str | None,
+    model: str | None,
+    *,
+    already_resolved: bool = False,
+) -> None:
+    if already_resolved:
+        key, resolved_base_url, resolved_model = api_key, base_url, model or DEFAULT_MODEL
+    else:
+        key, resolved_base_url, resolved_model, _key_source = resolve_openai_settings(api_key, base_url, model)
+    if hasattr(service, "configure_openai"):
+        service.configure_openai(api_key=key, base_url=resolved_base_url, model=resolved_model)
+
+
+def configure_agent_browser_handoff(service, *, allow_handoff: bool) -> None:
+    if hasattr(service, "configure_handoff"):
+        service.configure_handoff(
+            allow_handoff=allow_handoff,
+            handoff_waiter=lambda: Prompt.ask("[输入] 在浏览器中完成验证码后，回到这里按 Enter 继续", default="", show_default=False),
+        )
 
 
 def provider_label(routed: RoutedFormService) -> str:
@@ -396,7 +457,7 @@ def fetch_schema_with_handoff(
 ) -> FormSchema:
     login_error = login_required_error_type(routed)
     if login_error is None:
-        return fetch_schema_with_captcha_handoff(routed, url, allow_handoff=allow_handoff)
+        return fetch_schema_with_captcha_handoff(routed, url, allow_handoff=True)
     return fetch_browser_form_schema_with_login_handoff(
         routed,
         url,
@@ -560,8 +621,8 @@ def resolve_openai_settings(
     model: str | None,
 ) -> tuple[str | None, str | None, str, ApiKeySource]:
     key, key_source = resolve_openai_api_key(api_key)
-    resolved_base_url = base_url or os.getenv("OPENAI_BASE_URL") or load_base_url()
-    resolved_model = model or os.getenv("OPENAI_MODEL") or load_model() or DEFAULT_MODEL
+    resolved_base_url = base_url or os.getenv("OPENAI_BASE_URL") or load_base_url() or load_codex_base_url()
+    resolved_model = model or os.getenv("OPENAI_MODEL") or load_model() or load_codex_model() or DEFAULT_MODEL
     return key, resolved_base_url, resolved_model, key_source
 
 

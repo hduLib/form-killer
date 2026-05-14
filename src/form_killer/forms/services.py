@@ -13,7 +13,7 @@ from form_killer.forms.base import FormService
 Provider = str
 DocumentType = str
 BUILTIN_FORM_PROVIDER_PACKAGE = "form_killer.forms"
-_FORM_PROVIDER_INFRASTRUCTURE_MODULES = frozenset({"base", "browser_common", "services"})
+_FORM_PROVIDER_INFRASTRUCTURE_MODULES = frozenset({"agent_browser", "base", "browser_common", "services"})
 _FORM_PROVIDER_PLUGINS_LOADED = False
 
 
@@ -105,12 +105,26 @@ def form_providers() -> tuple[FormProvider, ...]:
     return tuple(_FORM_PROVIDER_REGISTRY)
 
 
-def resolve_form_service(url: str, *, providers: Iterable[FormProvider] | None = None) -> RoutedFormService:
+def resolve_form_service(
+    url: str,
+    *,
+    providers: Iterable[FormProvider] | None = None,
+    allow_agent_browser_fallback: bool = True,
+) -> RoutedFormService:
     active_providers = form_providers() if providers is None else tuple(providers)
     for provider in active_providers:
         routed = provider.resolve(url)
         if routed is not None:
             return routed
+
+    if providers is None and allow_agent_browser_fallback and _can_use_agent_browser_fallback(url):
+        from form_killer.forms.agent_browser import AGENT_BROWSER_PROVIDER, AgentBrowserFormService
+
+        return RoutedFormService(
+            provider=AGENT_BROWSER_PROVIDER,
+            document_type="form",
+            service=AgentBrowserFormService(),
+        )
 
     raise FormRouteError(f"暂不支持该 URL。当前支持 {supported_provider_labels(active_providers)}。")
 
@@ -119,3 +133,8 @@ def supported_provider_labels(providers: Iterable[FormProvider] | None = None) -
     active_providers = form_providers() if providers is None else tuple(providers)
     labels = [provider.label for provider in active_providers]
     return "、".join(labels) if labels else "已注册的表单 provider"
+
+
+def _can_use_agent_browser_fallback(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)

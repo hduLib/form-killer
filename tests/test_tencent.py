@@ -30,9 +30,15 @@ def test_route_marks_tencent_non_form_as_unsupported() -> None:
     assert routed.document_type == "unsupported"
 
 
-def test_route_rejects_unknown_hosts() -> None:
+def test_route_falls_back_for_unknown_hosts() -> None:
+    routed = resolve_form_service("https://example.test/form")
+
+    assert routed.provider == "agent-browser"
+
+
+def test_route_rejects_unknown_hosts_when_fallback_disabled() -> None:
     with pytest.raises(FormRouteError):
-        resolve_form_service("https://example.test/form")
+        resolve_form_service("https://example.test/form", allow_agent_browser_fallback=False)
 
 
 def test_classify_tencent_url() -> None:
